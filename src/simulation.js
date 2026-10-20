@@ -18,6 +18,10 @@
 // Las que nacen dentro de un paso nacen en su momento: con la edad que les toca y, en 'world', en
 // el punto del camino del emisor donde estaba en ese momento (sin grumos aunque se mueva rápido).
 //
+// Con `pixel` (pixel art), lo que se dibuja sale ya redondeado: el tamaño a píxeles enteros, el
+// color al de la paleta y el giro a pasos (pixel.js). Lo que se simula (velocidades, edad, el giro
+// libre en `rotation`) no cambia: el redondeo es solo de `size`, `color` y `angle`.
+//
 // Puro: no importa three ni DOM.
 import { resolveEmitter } from './emitter.js';
 import { createRandom } from './random.js';
@@ -26,6 +30,7 @@ import { sampleCurve, linearColorCurve, sampleLinearColor } from './curves.js';
 import { sampleShape } from './shapes.js';
 import { flipbookFrame } from './flipbook.js';
 import { noise3 } from './noise.js';
+import { pixelSize, stepAngle, createPalette, nearestColor } from './pixel.js';
 
 /** @typedef {[number, number, number]} Vec3 */
 /** @typedef {[number, number, number, number]} Quat */
@@ -40,7 +45,7 @@ export const MAX_DELTA = 1;
  * @typedef {{
  *   position: Float32Array, velocity: Float32Array, age: Float32Array, life: Float32Array,
  *   startSize: Float32Array, startColor: Float32Array, rotation: Float32Array, spin: Float32Array, seed: Float32Array,
- *   size: Float32Array, color: Float32Array, frame: Float32Array,
+ *   size: Float32Array, color: Float32Array, angle: Float32Array, frame: Float32Array,
  * }} ParticleData
  */
 
@@ -82,7 +87,7 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
     age: new Float32Array(N), life: new Float32Array(N),
     startSize: new Float32Array(N), startColor: new Float32Array(N * 3),
     rotation: new Float32Array(N), spin: new Float32Array(N), seed: new Float32Array(N),
-    size: new Float32Array(N), color: new Float32Array(N * 4), frame: new Float32Array(N),
+    size: new Float32Array(N), color: new Float32Array(N * 4), angle: new Float32Array(N), frame: new Float32Array(N),
   };
   const semilla = seed === undefined ? d.seed : seed;
   if (!Number.isInteger(semilla)) throw new TypeError(`seed: va un entero (vino ${JSON.stringify(seed)})`);
@@ -93,7 +98,8 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
   const RAD = Math.PI / 180;
   const colorA = hexToLinear(d.color[0]), colorB = hexToLinear(d.color[1]);
   const curvaColor = d.colorOverLife ? linearColorCurve(d.colorOverLife) : null;
-  const { sizeOverLife: curvaTam, alphaOverLife: curvaAlfa, speedOverLife: curvaVel, turbulence: turb } = d;
+  const { sizeOverLife: curvaTam, alphaOverLife: curvaAlfa, speedOverLife: curvaVel, turbulence: turb, pixel } = d;
+  const paleta = pixel?.palette ? createPalette(pixel.palette) : null;
 
   let vivas = 0, tiempo = 0, reloj = 0, resto = 0, perdidas = 0;
   let emitiendo = false, pausada = false, porPrecalentar = false, ubicada = false;
@@ -235,12 +241,17 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
     }
   }
 
-  /** Lo que se dibuja: tamaño, color con alfa y cuadro, según la edad. */
+  /** Lo que se dibuja: tamaño, color con alfa, giro y cuadro, según la edad (con pixel, redondeados). */
   function dibujo() {
-    const { age, life, startSize, startColor, seed: propia, size, color, frame } = data;
+    const { age, life, startSize, startColor, seed: propia, size, color, rotation, angle, frame } = data;
     for (let i = 0; i < vivas; i++) {
       const t = age[i] / life[i];
       size[i] = curvaTam ? startSize[i] * sampleCurve(curvaTam, t) : startSize[i];
+      angle[i] = rotation[i];
+      if (pixel) {
+        size[i] = pixelSize(size[i], pixel.pixelsPerUnit);
+        angle[i] = stepAngle(rotation[i], pixel.rotation);
+      }
       const i3 = i * 3, i4 = i * 4;
       if (curvaColor) {
         sampleLinearColor(curvaColor, t, c);
@@ -248,6 +259,7 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
       } else {
         color[i4] = startColor[i3]; color[i4 + 1] = startColor[i3 + 1]; color[i4 + 2] = startColor[i3 + 2];
       }
+      if (paleta) nearestColor(paleta, color, i4);
       color[i4 + 3] = curvaAlfa ? sampleCurve(curvaAlfa, t) : 1;
       frame[i] = flipbookFrame(d.texture, age[i], life[i], propia[i]);
     }
