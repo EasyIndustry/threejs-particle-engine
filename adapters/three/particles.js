@@ -28,6 +28,7 @@ import { createSimulation, sortByDepth } from '../../src/simulation.js';
 import { PRESETS } from '../../src/presets.js';
 import { softCircle } from '../../src/flipbook.js';
 import { BAYER_4 } from '../../src/pixel.js';
+import { registerForm, listForms, formGLSL } from '../../src/form.js';
 import { help } from '../../src/help.js';
 import { ENGINE_MEMBERS, EMITTER_MEMBERS } from '../../src/members.js';
 
@@ -41,16 +42,26 @@ import { ENGINE_MEMBERS, EMITTER_MEMBERS } from '../../src/members.js';
 // en la grilla de píxeles del plano de la vista (así un tamaño impar no queda a medio píxel); la
 // textura se muestrea en el centro de cada píxel del arte de la partícula, así el círculo sin
 // textura sale pixelado; y el desvanecer es un tramado de Bayer 4 × 4 en esos píxeles, o un recorte.
+//
+// Forma procedural (define FORM; ver src/form.js): en vez de la textura, la distancia de formSDF con
+// los parámetros de cada partícula (iForm) y su azar propio. Sin pixel, el borde lleva antialias con
+// la derivada de la distancia (nítido a cualquier tamaño); con pixel, se evalúa en el centro de cada
+// píxel del arte. softness es el ancho del borde suave. Con textura (FORM_TEXTURE), es su máscara.
 const VERT = /* glsl */ `
 #include <common>
 attribute vec3 iPosition;
 attribute vec4 iColor;
-attribute vec3 iParams; // tamaño, giro (radianes), cuadro
+attribute vec4 iParams; // tamaño, giro (radianes), cuadro, azar propio
+#ifdef FORM
+attribute vec4 iForm;   // los parámetros de la forma
+varying vec4 vForm;
+#endif
 uniform vec2 uFrames;
 uniform float uPPU;
 varying vec2 vLocal;
 varying vec2 vCelda;
 varying float vPx;
+varying float vSeed;
 varying vec4 vColor;
 #include <fog_pars_vertex>
 #include <logdepthbuf_pars_vertex>
@@ -73,6 +84,10 @@ void main() {
   vCelda = vec2(mod(cuadro, uFrames.x), floor(cuadro / uFrames.x));
   vLocal = uv;
   vColor = iColor;
+  vSeed = iParams.w;
+#ifdef FORM
+  vForm = iForm;
+#endif
 #include <logdepthbuf_vertex>
 #include <fog_vertex>
 }`;
@@ -83,10 +98,16 @@ const FRAG = /* glsl */ `
 #include <common>
 uniform sampler2D uMap;
 uniform vec2 uFrames;
+uniform float uSoftness;
 varying vec2 vLocal;
 varying vec2 vCelda;
 varying float vPx;
+varying float vSeed;
 varying vec4 vColor;
+#ifdef FORM
+varying vec4 vForm;
+/*FORMA*/
+#endif
 #ifdef FADE_DITHER
 const float BAYER[16] = float[16](${BAYER_4.map((x) => x.toFixed(5)).join(', ')});
 #endif
@@ -101,7 +122,24 @@ void main() {
   vec2 local = vLocal;
 #endif
   vec2 uv = vec2((vCelda.x + local.x) / uFrames.x, 1.0 - (vCelda.y + 1.0 - local.y) / uFrames.y);
+#ifdef FORM
+  float dist = formSDF(local * 2.0 - 1.0, vForm, vSeed);
+#ifdef PIXEL
+  float cubre = clamp(-dist / max(uSoftness, 1e-4), 0.0, 1.0);
+#else
+  float aa = fwidth(dist);
+  float cubre = clamp((aa * 0.5 - dist) / max(uSoftness + aa, 1e-4), 0.0, 1.0);
+#endif
+  cubre = cubre * cubre * (3.0 - 2.0 * cubre);
+#ifdef FORM_TEXTURE
   vec4 color = vColor * texture2D(uMap, uv);
+  color.a *= cubre;
+#else
+  vec4 color = vec4(vColor.rgb, vColor.a * cubre);
+#endif
+#else
+  vec4 color = vColor * texture2D(uMap, uv);
+#endif
 #if defined(FADE_DITHER)
   int k = int(mod(pixel.y, 4.0)) * 4 + int(mod(pixel.x, 4.0));
   if (color.a < BAYER[k]) discard;
@@ -190,10 +228,12 @@ export function createParticleEngine({ sort = true } = {}) {
     geo.setIndex([0, 1, 2, 0, 2, 3]);
     const aPos = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3).setUsage(THREE.DynamicDrawUsage);
     const aColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage);
-    const aParams = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    const aParams = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    const aForm = d.form ? new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage) : null;
     geo.setAttribute('iPosition', aPos);
     geo.setAttribute('iColor', aColor);
     geo.setAttribute('iParams', aParams);
+    if (aForm) geo.setAttribute('iForm', aForm);
     geo.instanceCount = 0;
 
     // pixel art: con filter 'nearest' (o con pixel) se usa una copia de la textura de la app con
@@ -218,6 +258,7 @@ export function createParticleEngine({ sort = true } = {}) {
     const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
       uFrames: { value: new THREE.Vector2(d.texture.frames[0], d.texture.frames[1]) },
       uPPU: { value: d.pixel ? d.pixel.pixelsPerUnit : 1 },
+      uSoftness: { value: d.softness },
     }]);
     // la textura va aparte: merge clona las texturas
     uniforms.uMap = { value: copia ?? texture ?? circulo(d.softness, !!d.pixel) };
@@ -231,8 +272,13 @@ export function createParticleEngine({ sort = true } = {}) {
       if (d.pixel.fade === 'dither') defines.FADE_DITHER = '';
       if (d.pixel.fade === 'cutout') defines.FADE_CUTOUT = '';
     }
+    if (d.form) {
+      defines.FORM = '';
+      if (texture) defines.FORM_TEXTURE = '';
+    }
     const mat = new THREE.ShaderMaterial({
-      name: `partículas ${d.name}`.trim(), vertexShader: VERT, fragmentShader: FRAG, uniforms, defines,
+      name: `partículas ${d.name}`.trim(), vertexShader: VERT, uniforms, defines,
+      fragmentShader: d.form ? FRAG.replace('/*FORMA*/', formGLSL(d.form.type)) : FRAG,
       transparent: true, depthWrite: false, fog: true,
       blending: d.blending === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
@@ -261,7 +307,7 @@ export function createParticleEngine({ sort = true } = {}) {
     /** Copia las vivas a los atributos (en orden de atrás para adelante si hace falta) y las sube. @param {THREE.Camera | undefined} camara */
     function subir(camara) {
       const n = sim.alive;
-      const { position: P, color: C, size, angle, frame } = sim.data;
+      const { position: P, color: C, size, angle, frame, seed: azar, form: F } = sim.data;
       /** @type {Uint32Array | null} */
       let o = null;
       if (ordenar && camara && d.blending === 'normal' && n > 1) {
@@ -272,20 +318,24 @@ export function createParticleEngine({ sort = true } = {}) {
         o = sortByDepth(P, n, vista, orden, distancias);
       }
       const ap = /** @type {Float32Array} */ (aPos.array), ac = /** @type {Float32Array} */ (aColor.array), ar = /** @type {Float32Array} */ (aParams.array);
+      const af = aForm ? /** @type {Float32Array} */ (aForm.array) : null;
       if (o) {
         for (let k = 0; k < n; k++) {
           const i = o[k];
           ap[k * 3] = P[i * 3]; ap[k * 3 + 1] = P[i * 3 + 1]; ap[k * 3 + 2] = P[i * 3 + 2];
           ac[k * 4] = C[i * 4]; ac[k * 4 + 1] = C[i * 4 + 1]; ac[k * 4 + 2] = C[i * 4 + 2]; ac[k * 4 + 3] = C[i * 4 + 3];
-          ar[k * 3] = size[i]; ar[k * 3 + 1] = angle[i]; ar[k * 3 + 2] = frame[i];
+          ar[k * 4] = size[i]; ar[k * 4 + 1] = angle[i]; ar[k * 4 + 2] = frame[i]; ar[k * 4 + 3] = azar[i];
+          if (af) { af[k * 4] = F[i * 4]; af[k * 4 + 1] = F[i * 4 + 1]; af[k * 4 + 2] = F[i * 4 + 2]; af[k * 4 + 3] = F[i * 4 + 3]; }
         }
       } else {
         ap.set(P.subarray(0, n * 3));
         ac.set(C.subarray(0, n * 4));
-        for (let i = 0; i < n; i++) { ar[i * 3] = size[i]; ar[i * 3 + 1] = angle[i]; ar[i * 3 + 2] = frame[i]; }
+        for (let i = 0; i < n; i++) { ar[i * 4] = size[i]; ar[i * 4 + 1] = angle[i]; ar[i * 4 + 2] = frame[i]; ar[i * 4 + 3] = azar[i]; }
+        if (af) af.set(F.subarray(0, n * 4));
       }
       if (n > 0) {
-        for (const [a, ancho] of /** @type {const} */ ([[aPos, 3], [aColor, 4], [aParams, 3]])) {
+        for (const [a, ancho] of /** @type {const} */ ([[aPos, 3], [aColor, 4], [aParams, 4], [aForm, 4]])) {
+          if (!a) continue;
           a.clearUpdateRanges();
           a.addUpdateRange(0, n * ancho);
           a.needsUpdate = true;
@@ -362,6 +412,14 @@ export function createParticleEngine({ sort = true } = {}) {
     /** El identificador de la definición. @param {Record<string, unknown>} def */
     hash: (def) => hashEmitter(def),
     PRESETS,
+    /**
+     * Agregar la forma procedural de una app ('app/nombre'): el GLSL de su distancia, con sus
+     * parámetros y su versión (ver src/form.js). Vale para los emisores que se creen después.
+     * @param {Parameters<typeof registerForm>[0]} form
+     */
+    registerForm: (form) => registerForm(form),
+    /** Las formas procedurales que hay: { name, version, params, doc }. */
+    forms: () => listForms(),
     /** Los emisores que hay. */
     get emitters() { return [...emisores].map((e) => e.emisor); },
 
