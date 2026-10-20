@@ -5,6 +5,42 @@ según [SemVer](https://semver.org): mientras sea `0.x`, una versión menor pued
 y si rompe queda dicho arriba de todo en esa entrada. Los pre-releases (`-rc.N`) se prueban
 en una app antes del release (ver `CONTRIBUTING.md`).
 
+## [0.1.0-rc.4] - 2026-10-20
+
+Hacia dónde mira cada partícula (#3).
+
+### Ruptura
+
+- **El borde suave de una forma es `form.edge`** (0 por defecto: nítido), no `softness`. Con el
+  `softness` del emisor (0.5 por defecto, pensado para el círculo con textura), una forma fina (un
+  anillo, una chispa) quedaba casi toda transparente y en pixel art se borraba. `softness` vuelve a
+  ser solo el borde del círculo sin textura. Cómo migrar: `form: 'ring', softness: 0.1` pasa a
+  `form: { type: 'ring', edge: 0.1 }`.
+
+### Agregado
+
+- **`align`** en la definición del emisor (null por defecto: mira a la cámara, como siempre):
+  - `{ type: 'velocity', stretch }`: estirada en la dirección en que viaja; el largo es
+    `size + rapidez × stretch`. No usa `rotation`.
+  - `{ type: 'plane', normal }`: acostada en el plano de la normal (en el espacio del emisor), de dos
+    caras; `rotation` la gira dentro del plano.
+  - Con `pixel`, el largo estirado se redondea a píxeles aparte del ancho (píxeles cuadrados) y, en
+    `plane`, el snap es en la grilla del plano.
+- En el núcleo, `src/align.js`: `normalizeAlign`, `planeBasis` (la base estable del plano) y
+  `ALIGN_TYPES`.
+- El ejemplo acuesta la onda en el piso.
+
+### Cambiado
+
+- Los presets `chispas` y `lluvia` se estiran según la velocidad (`align: 'velocity'`): la lluvia
+  son trazos y no gotas redondas.
+
+### Arreglado
+
+- **El hash de un emisor ya no cambia por las claves nuevas que no usa** (`pixel`, `form`,
+  `formOverLife`, `align`): desde la rc.2, cada clave nueva en null cambiaba el hash de todos los
+  emisores. Vuelve a ser el de la 0.1.0-rc.1 (salvo los presets `chispas` y `lluvia`, que cambiaron).
+
 ## [0.1.0-rc.3] - 2026-10-20
 
 Formas procedurales sin textura (#2). Todo suma; nada rompe.

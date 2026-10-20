@@ -26,14 +26,15 @@ test('las formas de fábrica: con su GLSL, parámetros dentro de rango y a lo su
 
 test('form: un nombre o { type, …parámetros }, con los que faltan por defecto', () => {
   assert.equal(defineEmitter({}).form, null);
-  assert.deepEqual(defineEmitter({ form: 'circle' }).form, { type: 'circle', params: {} });
-  assert.deepEqual(defineEmitter({ form: 'star' }).form, { type: 'star', params: { points: 5, inner: 0.45 } });
-  assert.deepEqual(defineEmitter({ form: { type: 'star', inner: 0.3 } }).form, { type: 'star', params: { points: 5, inner: 0.3 } });
+  assert.deepEqual(defineEmitter({ form: 'circle' }).form, { type: 'circle', params: {}, edge: 0 });
+  assert.deepEqual(defineEmitter({ form: 'star' }).form, { type: 'star', params: { points: 5, inner: 0.45 }, edge: 0 });
+  assert.deepEqual(defineEmitter({ form: { type: 'star', inner: 0.3, edge: 0.2 } }).form, { type: 'star', params: { points: 5, inner: 0.3 }, edge: 0.2 });
 });
 
 test('form: un error dice dónde', () => {
   assert.throws(() => defineEmitter({ form: 'estrella' }), /emitter\.form\.type: forma desconocida "estrella"/);
-  assert.throws(() => defineEmitter({ form: { type: 'ring', grosor: 0.2 } }), /emitter\.form\.grosor: parámetro desconocido de ring \(van thickness\)/);
+  assert.throws(() => defineEmitter({ form: { type: 'ring', grosor: 0.2 } }), /emitter\.form\.grosor: parámetro desconocido de ring \(van edge, thickness\)/);
+  assert.throws(() => defineEmitter({ form: { type: 'ring', edge: 2 } }), /emitter\.form\.edge: va de 0 \(nítido\) a 1/);
   assert.throws(() => defineEmitter({ form: { type: 'ring', thickness: 3 } }), /emitter\.form\.thickness: va de 0\.01 a 1/);
   assert.throws(() => defineEmitter({ formOverLife: { inner: [1, 0] } }), /emitter\.formOverLife: va con form/);
   assert.throws(() => defineEmitter({ form: 'star', formOverLife: { puntas: [5, 8] } }), /emitter\.formOverLife\.puntas: parámetro desconocido de star/);
@@ -46,8 +47,8 @@ test('form: vuelve igual por JSON, entra en el hash y extends la pisa por clave 
   assert.notEqual(hashEmitter({ form: 'star' }), hashEmitter({ form: 'circle' }));
   assert.equal(hashEmitter({ form: 'star' }), hashEmitter({ form: { type: 'star', points: 5 } }));
   const base = { extends: 'humo', form: { type: 'star', points: 6, inner: 0.3 } };
-  assert.deepEqual(defineEmitter({ extends: base, form: { inner: 0.5 } }).form, { type: 'star', params: { points: 6, inner: 0.5 } });
-  assert.deepEqual(defineEmitter({ extends: base, form: { type: 'ring' } }).form, { type: 'ring', params: { thickness: 0.3 } });
+  assert.deepEqual(defineEmitter({ extends: base, form: { inner: 0.5 } }).form, { type: 'star', params: { points: 6, inner: 0.5 }, edge: 0 });
+  assert.deepEqual(defineEmitter({ extends: base, form: { type: 'ring' } }).form, { type: 'ring', params: { thickness: 0.3 }, edge: 0 });
   // una definición ya normalizada, pisada con un parámetro suelto
   assert.deepEqual(defineEmitter({ extends: d, form: { inner: 0.6 } }).form?.params.inner, 0.6);
   assert.equal(defineEmitter({ extends: base, form: null }).form, null);
@@ -65,7 +66,7 @@ test('registerForm: las de una app van como app/nombre, validadas, y su versión
   const gota = { name: 'mi-app/gota', version: '1', doc: 'una gota', params: { punta: { default: 0.5, range: [0, 1] } }, glsl: 'return length(p - vec2(0.0, punta * 0.2)) - 1.0;' };
   registerForm(gota);
   const def = { form: { type: 'mi-app/gota', punta: 0.8 } };
-  assert.deepEqual(normalizeForm(def.form), { type: 'mi-app/gota', params: { punta: 0.8 } });
+  assert.deepEqual(normalizeForm(def.form), { type: 'mi-app/gota', params: { punta: 0.8 }, edge: 0 });
   const h1 = hashEmitter(def);
   registerForm({ ...gota, version: '2' });
   assert.notEqual(hashEmitter(def), h1, 'otra versión del GLSL, otro hash');

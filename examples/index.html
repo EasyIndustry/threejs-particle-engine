@@ -103,15 +103,15 @@
         extends: 'chispas', rate: 10, size: [0.08, 0.14], shape: { angle: 20 },
         pixel: { pixelsPerUnit: 16, fade: 'cutout', palette: ['#ffffff', '#ffe066', '#ff8c1a'] },
       }),
-      // formas procedurales, sin textura: una onda que se abre (ring con thickness a lo largo de la
-      // vida) y estrellitas que se afinan al apagarse
+      // formas procedurales, sin textura: una onda que se abre acostada en el piso (ring con
+      // thickness a lo largo de la vida, align: 'plane') y estrellitas que se afinan al apagarse
       onda: particulas.emitter({
         rate: 1.5, max: 6, life: 1.6, speed: 0, size: 2.5, sizeOverLife: [0.1, 1], color: '#7fdbff',
-        alphaOverLife: [[0, 1], [1, 0]], blending: 'additive', softness: 0.05,
-        form: 'ring', formOverLife: { thickness: [0.5, 0.03] },
+        alphaOverLife: [[0, 1], [1, 0]], blending: 'additive', align: 'plane',
+        form: { type: 'ring', edge: 0.05 }, formOverLife: { thickness: [0.5, 0.03] },
       }),
       estrellas: particulas.emitter({
-        extends: 'magia', rate: 25, size: [0.12, 0.22], rotation: [0, 72], angularVelocity: [-60, 60], softness: 0,
+        extends: 'magia', rate: 25, size: [0.12, 0.22], rotation: [0, 72], angularVelocity: [-60, 60],
         form: { type: 'star', points: 5 }, formOverLife: { inner: [0.5, 0.2] },
       }),
     };
@@ -122,7 +122,7 @@
     emisores.flipbook.position = [-4, 0.2, 0];
     emisores['fuego pixel'].position = [4, 0, 0];
     emisores['chispas pixel'].position = [4, 0.15, 0];
-    emisores.onda.position = [0, 1.6, 3];
+    emisores.onda.position = [0, 0.02, 3];   // apenas arriba del piso, para que no se pelee con él
     emisores.estrellas.position = [-2, 2.2, -1];
     const encendidos = { fuego: true, humo: true, chispas: true, magia: true, polvo: true, lluvia: false, flipbook: true, 'fuego pixel': true, 'chispas pixel': true, onda: true, estrellas: true };
     for (const [nombre, e] of Object.entries(emisores)) {
