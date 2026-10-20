@@ -1,6 +1,6 @@
 {
   "name": "threejs-particle-engine",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "Partículas para three.js: humo, chispas, polvo, magia, lluvia, explosiones. El emisor es datos (se valida, se hashea, se guarda en JSON), la simulación es pura y determinista, y se dibuja con una sola llamada por emisor.",
   "type": "module",
   "license": "MIT",

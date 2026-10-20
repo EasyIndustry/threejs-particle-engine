@@ -8,6 +8,8 @@ export const ENGINE_MEMBERS = [
   ['define(def)', 'la definición completa y validada: con los atajos resueltos, y un error que dice dónde si algo está mal'],
   ['hash(def)', 'el identificador de la definición: igual definición (aunque escrita distinto), igual hash'],
   ['PRESETS', 'los emisores típicos como datos: fuego, humo, chispas, polvo, lluvia, magia (se usan con extends)'],
+  ['registerForm(form)', "agregar una forma procedural de una app ('app/nombre'): { name, version, params, glsl, doc? }, el GLSL de su distancia (ver src/form.js)"],
+  ['forms()', 'las formas procedurales que hay: { name, version, params, doc } (circle, ring, square, diamond, star, cross, spark, noise y las de la app)'],
   ['emitters', 'los emisores que hay (una copia de la lista)'],
   ['update(dt, camera?)', 'avanza todos los emisores dt segundos y sube lo que cambió; con la cámara ordena los de blending normal (motor.onFrame((dt) => particulas.update(dt, motor.camera)))'],
   ['stats()', 'qué hay: { emitters, alive, drawCalls, dropped }'],

@@ -16,6 +16,8 @@
 //     texture: { frames: [4, 4], fps: 12, random: false, filter: 'linear' },   // flipbook (flipbook.js)
 //     blending: 'normal', softness: 0.5, seed: 1,
 //     pixel: { pixelsPerUnit: 16, snap: true, fade: 'dither', palette: null, rotation: 90 },   // pixel art (pixel.js)
+//     form: { type: 'star', points: 5, inner: 0.45 },  // sin textura: una forma procedural (form.js)
+//     formOverLife: { inner: [0.45, 0.2] },             // sus parámetros a lo largo de la vida
 //   }
 //
 // Qué hace cada cosa a lo largo de la vida:
@@ -28,12 +30,15 @@
 //   - turbulence empuja con un ruido (noise.js): strength es la aceleración, scale el tamaño de los
 //     remolinos (en unidades del mundo) y speed cuán rápido cambian.
 //   - softness es el borde del círculo suave que se usa sin textura (0 duro, 1 todo degradé).
+//   - form (null: el círculo suave de siempre) es una forma procedural (SDF) en vez de textura: nítida
+//     a cualquier tamaño, o pixelada con pixel; con textura, es una máscara. softness es su borde.
+//     formOverLife pisa sus parámetros con curvas a lo largo de la vida.
 //   - pixel (null: sin pixel art) redondea el tamaño a píxeles enteros, lleva el color a la paleta y
 //     el giro a pasos; el adaptador pega la posición a la grilla, muestrea la textura en ella y
 //     trama el desvanecer. Ver pixel.js.
 //
 // `extends` parte de un preset (por nombre) o de otra definición, y pisa lo que se pasa: `shape`,
-// `texture`, `turbulence` y `pixel` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
+// `texture`, `turbulence`, `pixel` y `form` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
 //
 // Puro: no importa three ni DOM.
 import { isHexColor, normalizeHex } from './color.js';
@@ -41,6 +46,7 @@ import { normalizeCurve } from './curves.js';
 import { normalizeShape } from './shapes.js';
 import { normalizeFlipbook } from './flipbook.js';
 import { normalizePixel } from './pixel.js';
+import { normalizeForm, getForm, formSignature } from './form.js';
 import { PRESETS } from './presets.js';
 
 /** @typedef {[number, number]} Range */
@@ -56,6 +62,7 @@ import { PRESETS } from './presets.js';
  *   gravity: Vec3, drag: number, wind: Vec3, turbulence: { strength: number, scale: number, speed: number } | null,
  *   space: 'world' | 'local', texture: import('./flipbook.js').Flipbook, blending: 'normal' | 'additive',
  *   softness: number, seed: number, pixel: import('./pixel.js').PixelDef | null,
+ *   form: import('./form.js').FormDef | null, formOverLife: Record<string, import('./curves.js').NumberCurve> | null,
  * }} EmitterDef
  */
 
@@ -66,12 +73,15 @@ export const EMITTER_DEFAULTS = Object.freeze({
   sizeOverLife: null, colorOverLife: null, alphaOverLife: null, speedOverLife: null,
   gravity: Object.freeze([0, 0, 0]), drag: 0, wind: Object.freeze([0, 0, 0]), turbulence: null,
   space: 'world', texture: null, blending: 'normal', softness: 0.5, seed: 1, pixel: null,
+  form: null, formOverLife: null,
 });
 const CLAVES = Object.keys(EMITTER_DEFAULTS);
 const SPACES = ['world', 'local'];
 const BLENDINGS = ['normal', 'additive'];
 /** Las secciones que `extends` pisa por clave. */
-const SECCIONES = ['shape', 'texture', 'turbulence', 'pixel'];
+const SECCIONES = ['shape', 'texture', 'turbulence', 'pixel', 'form'];
+/** Las secciones con `type`: si cambia el tipo, no se mezclan las claves de uno con las del otro. */
+const CON_TIPO = ['shape', 'form'];
 
 const plano = (/** @type {unknown} */ v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const finito = (/** @type {unknown} */ v) => typeof v === 'number' && Number.isFinite(v);
@@ -163,6 +173,26 @@ function turbulencia(v) {
 }
 
 /**
+ * Los parámetros de la forma a lo largo de la vida: { parámetro: curva }, o null.
+ * @param {unknown} v @param {import('./form.js').FormDef | null} form
+ * @returns {Record<string, import('./curves.js').NumberCurve> | null}
+ */
+function formaEnLaVida(v, form) {
+  if (v === undefined || v === null) return null;
+  if (!form) throw new Error('emitter.formOverLife: va con form (los parámetros de una forma)');
+  if (!plano(v)) throw new TypeError('emitter.formOverLife: va { parámetro: curva }');
+  const forma = /** @type {import('./form.js').Form} */ (getForm(form.type));
+  /** @type {Record<string, import('./curves.js').NumberCurve>} */
+  const out = {};
+  for (const [k, c] of Object.entries(/** @type {Record<string, unknown>} */ (v))) {
+    const p = forma.params[k];
+    if (!p) throw new Error(`emitter.formOverLife.${k}: parámetro desconocido de ${form.type} (van ${Object.keys(forma.params).join(', ') || 'ninguno'})`);
+    out[k] = /** @type {any} */ (normalizeCurve(c, `emitter.formOverLife.${k}`, 'number', p.range));
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
  * La definición sin `extends`: el preset o la definición de base, con lo que se pasa encima.
  * @param {Record<string, unknown>} def @param {number} [hondo] @returns {Record<string, unknown>}
  */
@@ -182,11 +212,11 @@ function resolverExtends(def, hondo = 0) {
   const out = { ...desde };
   for (const [k, v] of Object.entries(resto)) {
     const b = desde[k];
-    if (SECCIONES.includes(k) && plano(v) && (plano(b) || (k === 'shape' && typeof b === 'string'))) {
+    if (SECCIONES.includes(k) && plano(v) && (plano(b) || (CON_TIPO.includes(k) && typeof b === 'string'))) {
       const bo = /** @type {Record<string, unknown>} */ (typeof b === 'string' ? { type: b } : b);
       const vo = /** @type {Record<string, unknown>} */ (v);
       // otra forma: no se mezclan las claves de una con las de la otra
-      out[k] = k === 'shape' && vo.type !== undefined && vo.type !== bo.type ? vo : { ...bo, ...vo };
+      out[k] = CON_TIPO.includes(k) && vo.type !== undefined && vo.type !== bo.type ? vo : { ...bo, ...vo };
       // la esfera dice de dónde emite con surface o con emitFrom: el que se pasa manda
       if (k === 'shape' && ('surface' in vo || 'emitFrom' in vo)) {
         const s = /** @type {Record<string, unknown>} */ (out[k]);
@@ -255,7 +285,11 @@ export function defineEmitter(def) {
     softness: num(de('softness'), 'emitter.softness', 0, 1),
     seed,
     pixel: normalizePixel(de('pixel')),
+    form: null,
+    formOverLife: null,
   };
+  out.form = normalizeForm(de('form'));
+  out.formOverLife = formaEnLaVida(de('formOverLife'), out.form);
   normalizados.add(out);
   return out;
 }
@@ -279,7 +313,9 @@ export function stableStringify(v) {
  * @param {Record<string, unknown> | EmitterDef} def @param {string} [extra]
  */
 export function hashEmitter(def, extra = '') {
-  const s = stableStringify(resolveEmitter(def)) + extra;
+  const d = resolveEmitter(def);
+  // la versión de la forma: si cambia su GLSL, cambia el hash
+  const s = stableStringify(d) + formSignature(d.form) + extra;
   // FNV-1a de 53 bits, como hashMaterial
   let h1 = 0x811c9dc5, h2 = 0x01000193;
   for (let i = 0; i < s.length; i++) {

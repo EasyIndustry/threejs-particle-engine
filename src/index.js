@@ -8,6 +8,7 @@ export { SHAPES, normalizeShape, sampleShape } from './shapes.js';
 export { normalizeCurve, sampleCurve, sampleColorCurve } from './curves.js';
 export { normalizeFlipbook, flipbookFrame, frameUV, softCircle } from './flipbook.js';
 export { PIXEL_DEFAULTS, PIXEL_FADES, BAYER_4, normalizePixel, pixelSize, stepAngle, createPalette, nearestColor } from './pixel.js';
+export { MAX_FORM_PARAMS, FORM_NOISE_GLSL, registerForm, getForm, listForms, normalizeForm, formSignature, formGLSL } from './form.js';
 export { createRandom } from './random.js';
 export { noise3 } from './noise.js';
 export { isHexColor, hexToLinear, linearToHex } from './color.js';

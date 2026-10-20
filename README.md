@@ -54,6 +54,17 @@ particulas.help();                                                          // t
 - **Sin textura, un círculo suave** generado (`softness`: de borde duro a todo degradé). **Con
   `texture`**, cualquier `THREE.Texture`: una hoja de flipbook, o una que hornea
   threejs-material-engine (su generador `dots`, por ejemplo).
+- **Formas procedurales, sin textura**: `form: { type, …parámetros }` dibuja la partícula con una
+  función de distancia (SDF) en el shader: `circle`, `ring` (`thickness`), `square` (`roundness`),
+  `diamond`, `star` (`points`, `inner`), `cross` (`thickness`), `spark` (`width`) y `noise` (`amount`,
+  `scale`: una mancha con el borde de ruido, distinta en cada partícula). Sale nítida a cualquier
+  tamaño (antialias con la derivada) y, con `pixel`, la misma forma sale pixelada. `softness` es su
+  borde, y `formOverLife: { inner: [0.5, 0.2] }` anima sus parámetros a lo largo de la vida (una onda
+  que se abre, una estrella que se afina). Con una textura, la forma es su máscara. Una app suma las
+  suyas con `particulas.registerForm({ name: 'app/gota', version, params, glsl })`: el cuerpo de
+  `float formSDF(vec2 p, vec4 f, float seed)` con el quad de -1 a 1, sus parámetros (hasta 4) como
+  variables y `formNoise(vec2)` para usar; su `version` entra en el hash. `form` no es `shape`: `shape`
+  es de donde nacen.
 - **Pixel art**: `pixel: { pixelsPerUnit, snap, fade, palette, rotation }` (o `pixel: true`) hace que
   las partículas sean del mismo mundo que los sprites de threejs-sprite-engine:
   - el tamaño se redondea a **píxeles enteros** del arte (`pixelsPerUnit`, como en los sprites), y la

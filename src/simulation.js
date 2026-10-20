@@ -22,6 +22,9 @@
 // color al de la paleta y el giro a pasos (pixel.js). Lo que se simula (velocidades, edad, el giro
 // libre en `rotation`) no cambia: el redondeo es solo de `size`, `color` y `angle`.
 //
+// Con `form`, `data.form` tiene los parámetros de la forma de cada una (4 por partícula, en el orden
+// de los de la forma): los de la definición, pisados por formOverLife según la edad.
+//
 // Puro: no importa three ni DOM.
 import { resolveEmitter } from './emitter.js';
 import { createRandom } from './random.js';
@@ -31,6 +34,7 @@ import { sampleShape } from './shapes.js';
 import { flipbookFrame } from './flipbook.js';
 import { noise3 } from './noise.js';
 import { pixelSize, stepAngle, createPalette, nearestColor } from './pixel.js';
+import { getForm } from './form.js';
 
 /** @typedef {[number, number, number]} Vec3 */
 /** @typedef {[number, number, number, number]} Quat */
@@ -45,7 +49,7 @@ export const MAX_DELTA = 1;
  * @typedef {{
  *   position: Float32Array, velocity: Float32Array, age: Float32Array, life: Float32Array,
  *   startSize: Float32Array, startColor: Float32Array, rotation: Float32Array, spin: Float32Array, seed: Float32Array,
- *   size: Float32Array, color: Float32Array, angle: Float32Array, frame: Float32Array,
+ *   size: Float32Array, color: Float32Array, angle: Float32Array, frame: Float32Array, form: Float32Array,
  * }} ParticleData
  */
 
@@ -88,6 +92,7 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
     startSize: new Float32Array(N), startColor: new Float32Array(N * 3),
     rotation: new Float32Array(N), spin: new Float32Array(N), seed: new Float32Array(N),
     size: new Float32Array(N), color: new Float32Array(N * 4), angle: new Float32Array(N), frame: new Float32Array(N),
+    form: new Float32Array(d.form ? N * 4 : 0),
   };
   const semilla = seed === undefined ? d.seed : seed;
   if (!Number.isInteger(semilla)) throw new TypeError(`seed: va un entero (vino ${JSON.stringify(seed)})`);
@@ -100,6 +105,12 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
   const curvaColor = d.colorOverLife ? linearColorCurve(d.colorOverLife) : null;
   const { sizeOverLife: curvaTam, alphaOverLife: curvaAlfa, speedOverLife: curvaVel, turbulence: turb, pixel } = d;
   const paleta = pixel?.palette ? createPalette(pixel.palette) : null;
+  // los parámetros de la forma, en su orden: el valor fijo y, si hay, la curva de formOverLife
+  const parametrosForma = d.form
+    ? Object.keys(/** @type {import('./form.js').Form} */ (getForm(d.form.type)).params).map((k) => ({
+      valor: /** @type {import('./form.js').FormDef} */ (d.form).params[k], curva: d.formOverLife?.[k] ?? null,
+    }))
+    : [];
 
   let vivas = 0, tiempo = 0, reloj = 0, resto = 0, perdidas = 0;
   let emitiendo = false, pausada = false, porPrecalentar = false, ubicada = false;
@@ -262,6 +273,10 @@ export function createSimulation(def, { seed, autoplay = true } = {}) {
       if (paleta) nearestColor(paleta, color, i4);
       color[i4 + 3] = curvaAlfa ? sampleCurve(curvaAlfa, t) : 1;
       frame[i] = flipbookFrame(d.texture, age[i], life[i], propia[i]);
+      for (let k = 0; k < parametrosForma.length; k++) {
+        const { valor, curva } = parametrosForma[k];
+        data.form[i * 4 + k] = curva ? sampleCurve(curva, t) : valor;
+      }
     }
   }
 

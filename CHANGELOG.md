@@ -5,6 +5,29 @@ según [SemVer](https://semver.org): mientras sea `0.x`, una versión menor pued
 y si rompe queda dicho arriba de todo en esa entrada. Los pre-releases (`-rc.N`) se prueban
 en una app antes del release (ver `CONTRIBUTING.md`).
 
+## [0.1.0-rc.3] - 2026-10-20
+
+Formas procedurales sin textura (#2). Todo suma; nada rompe.
+
+### Agregado
+
+- **`form`** en la definición del emisor: la partícula es una función de distancia (SDF) evaluada en
+  el shader, en vez de una textura. De fábrica: `circle`, `ring`, `square`, `diamond`, `star`,
+  `cross`, `spark` y `noise`, cada una con sus parámetros. Nítida a cualquier tamaño, o pixelada con
+  `pixel`; `softness` es su borde; con textura, es su máscara. `extends` la pisa por clave (salvo que
+  cambie el tipo).
+- **`formOverLife`**: los parámetros de la forma con curvas a lo largo de la vida.
+- **`registerForm`** (en el núcleo y en el motor) para las formas de una app (`'app/nombre'`), y
+  `forms()` / `listForms()`. La versión de la forma entra en `hashEmitter`.
+- En el núcleo, `src/form.js`: `getForm`, `normalizeForm`, `formSignature`, `formGLSL`,
+  `FORM_NOISE_GLSL`, `MAX_FORM_PARAMS`; `simulation.data.form` (4 parámetros por partícula).
+- El ejemplo suma una onda (`ring`) y estrellitas (`star`).
+
+### Cambiado
+
+- El atributo por instancia `iParams` del adaptador pasa a 4 componentes (suma el azar propio de
+  cada partícula, que usa `noise`).
+
 ## [0.1.0-rc.2] - 2026-10-20
 
 Partículas pixel art (#1). Todo suma; nada rompe.
