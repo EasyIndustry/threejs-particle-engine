@@ -29,6 +29,7 @@ import { PRESETS } from '../../src/presets.js';
 import { softCircle } from '../../src/flipbook.js';
 import { BAYER_4 } from '../../src/pixel.js';
 import { registerForm, listForms, formGLSL } from '../../src/form.js';
+import { planeBasis } from '../../src/align.js';
 import { help } from '../../src/help.js';
 import { ENGINE_MEMBERS, EMITTER_MEMBERS } from '../../src/members.js';
 
@@ -43,10 +44,16 @@ import { ENGINE_MEMBERS, EMITTER_MEMBERS } from '../../src/members.js';
 // textura se muestrea en el centro de cada píxel del arte de la partícula, así el círculo sin
 // textura sale pixelado; y el desvanecer es un tramado de Bayer 4 × 4 en esos píxeles, o un recorte.
 //
+// Orientación (defines ALIGN_VELOCITY y ALIGN_PLANE; ver src/align.js): sin ellos, el quad mira a la
+// cámara. Con ALIGN_VELOCITY, su "arriba" va en la dirección en que viaja en la pantalla y su largo
+// suma rapidez × uStretch. Con ALIGN_PLANE, se arma en el plano de uEjeU y uEjeV (en el espacio de
+// la simulación: en 'world' el adaptador los gira con el emisor en cada cuadro).
+//
 // Forma procedural (define FORM; ver src/form.js): en vez de la textura, la distancia de formSDF con
 // los parámetros de cada partícula (iForm) y su azar propio. Sin pixel, el borde lleva antialias con
 // la derivada de la distancia (nítido a cualquier tamaño); con pixel, se evalúa en el centro de cada
-// píxel del arte. softness es el ancho del borde suave. Con textura (FORM_TEXTURE), es su máscara.
+// píxel del arte. uEdge (form.edge) es el ancho del borde suave. Con textura (FORM_TEXTURE), es su
+// máscara.
 const VERT = /* glsl */ `
 #include <common>
 attribute vec3 iPosition;
@@ -56,29 +63,77 @@ attribute vec4 iParams; // tamaño, giro (radianes), cuadro, azar propio
 attribute vec4 iForm;   // los parámetros de la forma
 varying vec4 vForm;
 #endif
+#ifdef ALIGN_VELOCITY
+attribute vec3 iVelocity;
+uniform float uStretch;
+#endif
+#ifdef ALIGN_PLANE
+uniform vec3 uEjeU;
+uniform vec3 uEjeV;
+#endif
 uniform vec2 uFrames;
 uniform float uPPU;
 varying vec2 vLocal;
 varying vec2 vCelda;
-varying float vPx;
+varying vec2 vPx;
 varying float vSeed;
 varying vec4 vColor;
 #include <fog_pars_vertex>
 #include <logdepthbuf_pars_vertex>
 void main() {
+  // el tamaño del quad: cuadrado, o estirado según la velocidad (ALIGN_VELOCITY); con pixel, en
+  // píxeles enteros de ancho y de alto por separado, así los píxeles del arte quedan cuadrados
+  vec2 lados = vec2(iParams.x);
+#ifdef ALIGN_VELOCITY
+#ifdef ESPACIO_MUNDO
+  vec3 vel = (viewMatrix * vec4(iVelocity, 0.0)).xyz;
+#else
+  vec3 vel = (modelViewMatrix * vec4(iVelocity, 0.0)).xyz;
+#endif
+  lados.y += uStretch * length(iVelocity);
+#endif
+  vPx = floor(lados * uPPU + 0.5);
+#ifdef PIXEL
+  lados = vPx / uPPU;
+#endif
+  vec2 q = position.xy * lados;
+#ifdef ALIGN_PLANE
+  // acostada en el plano (uEjeU, uEjeV, en el espacio de la simulación), girada dentro de él
+  float c = cos(iParams.y), s = sin(iParams.y);
+  vec2 r = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+  vec3 centro = iPosition;
+#ifdef PIXEL_SNAP
+  vec2 enPlano = vec2(dot(centro, uEjeU), dot(centro, uEjeV));
+  vec2 media = vPx * 0.5;
+  vec2 pegado = (floor(enPlano * uPPU - media + 0.5) + media) / uPPU;
+  centro += uEjeU * (pegado.x - enPlano.x) + uEjeV * (pegado.y - enPlano.y);
+#endif
+  vec3 punto = centro + uEjeU * r.x + uEjeV * r.y;
+#ifdef ESPACIO_MUNDO
+  vec4 mvPosition = viewMatrix * vec4(punto, 1.0);
+#else
+  vec4 mvPosition = modelViewMatrix * vec4(punto, 1.0);
+#endif
+#else
 #ifdef ESPACIO_MUNDO
   vec4 mvPosition = viewMatrix * vec4(iPosition, 1.0);
 #else
   vec4 mvPosition = modelViewMatrix * vec4(iPosition, 1.0);
 #endif
-  vPx = floor(iParams.x * uPPU + 0.5);
 #ifdef PIXEL_SNAP
-  vec2 media = vec2(vPx * 0.5);
+  vec2 media = vPx * 0.5;
   mvPosition.xy = (floor(mvPosition.xy * uPPU - media + 0.5) + media) / uPPU;
 #endif
+#ifdef ALIGN_VELOCITY
+  // "arriba" del quad, en la dirección en que viaja en la pantalla
+  float rapidez = length(vel.xy);
+  vec2 eje = rapidez > 1e-6 ? vel.xy / rapidez : vec2(0.0, 1.0);
+  mvPosition.xy += vec2(eje.y, -eje.x) * q.x + eje * q.y;
+#else
   float c = cos(iParams.y), s = sin(iParams.y);
-  vec2 q = position.xy * iParams.x;
   mvPosition.xy += vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+#endif
+#endif
   gl_Position = projectionMatrix * mvPosition;
   float cuadro = floor(iParams.z + 0.5);
   vCelda = vec2(mod(cuadro, uFrames.x), floor(cuadro / uFrames.x));
@@ -98,10 +153,10 @@ const FRAG = /* glsl */ `
 #include <common>
 uniform sampler2D uMap;
 uniform vec2 uFrames;
-uniform float uSoftness;
+uniform float uEdge;
 varying vec2 vLocal;
 varying vec2 vCelda;
-varying float vPx;
+varying vec2 vPx;
 varying float vSeed;
 varying vec4 vColor;
 #ifdef FORM
@@ -116,8 +171,8 @@ const float BAYER[16] = float[16](${BAYER_4.map((x) => x.toFixed(5)).join(', ')}
 void main() {
 #include <logdepthbuf_fragment>
 #ifdef PIXEL
-  vec2 pixel = floor(vLocal * max(vPx, 1.0));
-  vec2 local = (pixel + 0.5) / max(vPx, 1.0);
+  vec2 pixel = floor(vLocal * max(vPx, vec2(1.0)));
+  vec2 local = (pixel + 0.5) / max(vPx, vec2(1.0));
 #else
   vec2 local = vLocal;
 #endif
@@ -125,10 +180,10 @@ void main() {
 #ifdef FORM
   float dist = formSDF(local * 2.0 - 1.0, vForm, vSeed);
 #ifdef PIXEL
-  float cubre = clamp(-dist / max(uSoftness, 1e-4), 0.0, 1.0);
+  float cubre = clamp(-dist / max(uEdge, 1e-4), 0.0, 1.0);
 #else
   float aa = fwidth(dist);
-  float cubre = clamp((aa * 0.5 - dist) / max(uSoftness + aa, 1e-4), 0.0, 1.0);
+  float cubre = clamp((aa * 0.5 - dist) / max(uEdge + aa, 1e-4), 0.0, 1.0);
 #endif
   cubre = cubre * cubre * (3.0 - 2.0 * cubre);
 #ifdef FORM_TEXTURE
@@ -230,10 +285,12 @@ export function createParticleEngine({ sort = true } = {}) {
     const aColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage);
     const aParams = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage);
     const aForm = d.form ? new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage) : null;
+    const aVel = d.align?.type === 'velocity' ? new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3).setUsage(THREE.DynamicDrawUsage) : null;
     geo.setAttribute('iPosition', aPos);
     geo.setAttribute('iColor', aColor);
     geo.setAttribute('iParams', aParams);
     if (aForm) geo.setAttribute('iForm', aForm);
+    if (aVel) geo.setAttribute('iVelocity', aVel);
     geo.instanceCount = 0;
 
     // pixel art: con filter 'nearest' (o con pixel) se usa una copia de la textura de la app con
@@ -258,8 +315,14 @@ export function createParticleEngine({ sort = true } = {}) {
     const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
       uFrames: { value: new THREE.Vector2(d.texture.frames[0], d.texture.frames[1]) },
       uPPU: { value: d.pixel ? d.pixel.pixelsPerUnit : 1 },
-      uSoftness: { value: d.softness },
+      uEdge: { value: d.form ? d.form.edge : 0 },
+      uStretch: { value: d.align?.type === 'velocity' ? d.align.stretch : 0 },
+      uEjeU: { value: new THREE.Vector3(1, 0, 0) },
+      uEjeV: { value: new THREE.Vector3(0, 1, 0) },
     }]);
+    // la base del plano, en el espacio del emisor; en 'world' se gira con él en cada cuadro
+    const base = d.align?.type === 'plane' ? planeBasis(d.align.normal).map((e) => new THREE.Vector3(...e)) : null;
+    if (base) { uniforms.uEjeU.value.copy(base[0]); uniforms.uEjeV.value.copy(base[1]); }
     // la textura va aparte: merge clona las texturas
     uniforms.uMap = { value: copia ?? texture ?? circulo(d.softness, !!d.pixel) };
     /** @type {Record<string, string>} */
@@ -272,6 +335,8 @@ export function createParticleEngine({ sort = true } = {}) {
       if (d.pixel.fade === 'dither') defines.FADE_DITHER = '';
       if (d.pixel.fade === 'cutout') defines.FADE_CUTOUT = '';
     }
+    if (d.align?.type === 'velocity') defines.ALIGN_VELOCITY = '';
+    if (d.align?.type === 'plane') defines.ALIGN_PLANE = '';
     if (d.form) {
       defines.FORM = '';
       if (texture) defines.FORM_TEXTURE = '';
@@ -280,6 +345,7 @@ export function createParticleEngine({ sort = true } = {}) {
       name: `partículas ${d.name}`.trim(), vertexShader: VERT, uniforms, defines,
       fragmentShader: d.form ? FRAG.replace('/*FORMA*/', formGLSL(d.form.type)) : FRAG,
       transparent: true, depthWrite: false, fog: true,
+      side: d.align?.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide, // acostada, se ve de los dos lados
       blending: d.blending === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
     const malla = new THREE.Mesh(geo, mat);
@@ -302,12 +368,17 @@ export function createParticleEngine({ sort = true } = {}) {
       object.matrixWorld.decompose(tPos, tRot, tEsc);
       posicion[0] = tPos.x; posicion[1] = tPos.y; posicion[2] = tPos.z;
       rotacion[0] = tRot.x; rotacion[1] = tRot.y; rotacion[2] = tRot.z; rotacion[3] = tRot.w;
+      // en 'world', el plano se inclina con el emisor
+      if (base && d.space === 'world') {
+        uniforms.uEjeU.value.copy(base[0]).applyQuaternion(tRot);
+        uniforms.uEjeV.value.copy(base[1]).applyQuaternion(tRot);
+      }
     }
 
     /** Copia las vivas a los atributos (en orden de atrás para adelante si hace falta) y las sube. @param {THREE.Camera | undefined} camara */
     function subir(camara) {
       const n = sim.alive;
-      const { position: P, color: C, size, angle, frame, seed: azar, form: F } = sim.data;
+      const { position: P, color: C, size, angle, frame, seed: azar, form: F, velocity: Vel } = sim.data;
       /** @type {Uint32Array | null} */
       let o = null;
       if (ordenar && camara && d.blending === 'normal' && n > 1) {
@@ -319,6 +390,7 @@ export function createParticleEngine({ sort = true } = {}) {
       }
       const ap = /** @type {Float32Array} */ (aPos.array), ac = /** @type {Float32Array} */ (aColor.array), ar = /** @type {Float32Array} */ (aParams.array);
       const af = aForm ? /** @type {Float32Array} */ (aForm.array) : null;
+      const av = aVel ? /** @type {Float32Array} */ (aVel.array) : null;
       if (o) {
         for (let k = 0; k < n; k++) {
           const i = o[k];
@@ -326,15 +398,17 @@ export function createParticleEngine({ sort = true } = {}) {
           ac[k * 4] = C[i * 4]; ac[k * 4 + 1] = C[i * 4 + 1]; ac[k * 4 + 2] = C[i * 4 + 2]; ac[k * 4 + 3] = C[i * 4 + 3];
           ar[k * 4] = size[i]; ar[k * 4 + 1] = angle[i]; ar[k * 4 + 2] = frame[i]; ar[k * 4 + 3] = azar[i];
           if (af) { af[k * 4] = F[i * 4]; af[k * 4 + 1] = F[i * 4 + 1]; af[k * 4 + 2] = F[i * 4 + 2]; af[k * 4 + 3] = F[i * 4 + 3]; }
+          if (av) { av[k * 3] = Vel[i * 3]; av[k * 3 + 1] = Vel[i * 3 + 1]; av[k * 3 + 2] = Vel[i * 3 + 2]; }
         }
       } else {
         ap.set(P.subarray(0, n * 3));
         ac.set(C.subarray(0, n * 4));
         for (let i = 0; i < n; i++) { ar[i * 4] = size[i]; ar[i * 4 + 1] = angle[i]; ar[i * 4 + 2] = frame[i]; ar[i * 4 + 3] = azar[i]; }
         if (af) af.set(F.subarray(0, n * 4));
+        if (av) av.set(Vel.subarray(0, n * 3));
       }
       if (n > 0) {
-        for (const [a, ancho] of /** @type {const} */ ([[aPos, 3], [aColor, 4], [aParams, 4], [aForm, 4]])) {
+        for (const [a, ancho] of /** @type {const} */ ([[aPos, 3], [aColor, 4], [aParams, 4], [aForm, 4], [aVel, 3]])) {
           if (!a) continue;
           a.clearUpdateRanges();
           a.addUpdateRange(0, n * ancho);

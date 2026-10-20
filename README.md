@@ -58,13 +58,20 @@ particulas.help();                                                          // t
   función de distancia (SDF) en el shader: `circle`, `ring` (`thickness`), `square` (`roundness`),
   `diamond`, `star` (`points`, `inner`), `cross` (`thickness`), `spark` (`width`) y `noise` (`amount`,
   `scale`: una mancha con el borde de ruido, distinta en cada partícula). Sale nítida a cualquier
-  tamaño (antialias con la derivada) y, con `pixel`, la misma forma sale pixelada. `softness` es su
-  borde, y `formOverLife: { inner: [0.5, 0.2] }` anima sus parámetros a lo largo de la vida (una onda
+  tamaño (antialias con la derivada) y, con `pixel`, la misma forma sale pixelada. `edge` es su
+  borde suave (0 nítido, por defecto; 1 todo degradé: `{ type: 'circle', edge: 0.9 }`), y `formOverLife: { inner: [0.5, 0.2] }` anima sus parámetros a lo largo de la vida (una onda
   que se abre, una estrella que se afina). Con una textura, la forma es su máscara. Una app suma las
   suyas con `particulas.registerForm({ name: 'app/gota', version, params, glsl })`: el cuerpo de
   `float formSDF(vec2 p, vec4 f, float seed)` con el quad de -1 a 1, sus parámetros (hasta 4) como
   variables y `formNoise(vec2)` para usar; su `version` entra en el hash. `form` no es `shape`: `shape`
   es de donde nacen.
+- **Hacia dónde mira**: `align` (por defecto la cámara). `{ type: 'velocity', stretch }` la estira
+  en la dirección en que viaja: el largo es `size + rapidez × stretch` (los segundos de recorrido que
+  muestra), para chispas, lluvia en trazos o estelas. `{ type: 'plane', normal }` la acuesta en un
+  plano (en el espacio del emisor: girarlo lo inclina; `rotation` la gira dentro del plano), de dos
+  caras, para ondas en el agua, huellas, marcas o un círculo mágico en el piso; en el piso, "arriba"
+  del arte es −z. Con `pixel`, los píxeles siguen cuadrados (el largo se redondea aparte) y en
+  `plane` el snap es en la grilla del plano.
 - **Pixel art**: `pixel: { pixelsPerUnit, snap, fade, palette, rotation }` (o `pixel: true`) hace que
   las partículas sean del mismo mundo que los sprites de threejs-sprite-engine:
   - el tamaño se redondea a **píxeles enteros** del arte (`pixelsPerUnit`, como en los sprites), y la
@@ -160,7 +167,8 @@ motor.onFrame((dt) => particulas.update(dt, motor.camera));
 - **Partículas suaves** (soft particles: que se desvanezcan al cortar una superficie): necesitan la
   textura de profundidad de la escena, que es de render (un issue futuro a threejs-render-engine).
   `softness` hoy es solo el borde del círculo por defecto.
-- **Estelas** (trails) y partículas estiradas según la velocidad (la lluvia hoy son gotas redondas).
+- **Estelas como cintas** (trails: una tira continua detrás de cada partícula). Las partículas
+  estiradas según la velocidad sí están (`align: 'velocity'`).
 - **Sub-emisores**: una chispa que al morir larga humo.
 - Mientras tanto, `speedOverLife` multiplica la velocidad entera (con la gravedad incluida) y la
   turbulencia es ruido de valor, no un campo de rotor: alcanza para humo, polvo y magia, no para un

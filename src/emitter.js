@@ -18,6 +18,7 @@
 //     pixel: { pixelsPerUnit: 16, snap: true, fade: 'dither', palette: null, rotation: 90 },   // pixel art (pixel.js)
 //     form: { type: 'star', points: 5, inner: 0.45 },  // sin textura: una forma procedural (form.js)
 //     formOverLife: { inner: [0.45, 0.2] },             // sus parámetros a lo largo de la vida
+//     align: { type: 'velocity', stretch: 0.05 },       // hacia dónde mira el quad (align.js)
 //   }
 //
 // Qué hace cada cosa a lo largo de la vida:
@@ -31,14 +32,15 @@
 //     remolinos (en unidades del mundo) y speed cuán rápido cambian.
 //   - softness es el borde del círculo suave que se usa sin textura (0 duro, 1 todo degradé).
 //   - form (null: el círculo suave de siempre) es una forma procedural (SDF) en vez de textura: nítida
-//     a cualquier tamaño, o pixelada con pixel; con textura, es una máscara. softness es su borde.
+//     a cualquier tamaño, o pixelada con pixel; con textura, es una máscara. Su borde es form.edge.
 //     formOverLife pisa sus parámetros con curvas a lo largo de la vida.
+//   - align (null: mira a la cámara) estira la partícula según su velocidad o la acuesta en un plano.
 //   - pixel (null: sin pixel art) redondea el tamaño a píxeles enteros, lleva el color a la paleta y
 //     el giro a pasos; el adaptador pega la posición a la grilla, muestrea la textura en ella y
 //     trama el desvanecer. Ver pixel.js.
 //
 // `extends` parte de un preset (por nombre) o de otra definición, y pisa lo que se pasa: `shape`,
-// `texture`, `turbulence`, `pixel` y `form` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
+// `texture`, `turbulence`, `pixel`, `form` y `align` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
 //
 // Puro: no importa three ni DOM.
 import { isHexColor, normalizeHex } from './color.js';
@@ -47,6 +49,7 @@ import { normalizeShape } from './shapes.js';
 import { normalizeFlipbook } from './flipbook.js';
 import { normalizePixel } from './pixel.js';
 import { normalizeForm, getForm, formSignature } from './form.js';
+import { normalizeAlign } from './align.js';
 import { PRESETS } from './presets.js';
 
 /** @typedef {[number, number]} Range */
@@ -63,6 +66,7 @@ import { PRESETS } from './presets.js';
  *   space: 'world' | 'local', texture: import('./flipbook.js').Flipbook, blending: 'normal' | 'additive',
  *   softness: number, seed: number, pixel: import('./pixel.js').PixelDef | null,
  *   form: import('./form.js').FormDef | null, formOverLife: Record<string, import('./curves.js').NumberCurve> | null,
+ *   align: import('./align.js').AlignDef | null,
  * }} EmitterDef
  */
 
@@ -73,15 +77,17 @@ export const EMITTER_DEFAULTS = Object.freeze({
   sizeOverLife: null, colorOverLife: null, alphaOverLife: null, speedOverLife: null,
   gravity: Object.freeze([0, 0, 0]), drag: 0, wind: Object.freeze([0, 0, 0]), turbulence: null,
   space: 'world', texture: null, blending: 'normal', softness: 0.5, seed: 1, pixel: null,
-  form: null, formOverLife: null,
+  form: null, formOverLife: null, align: null,
 });
 const CLAVES = Object.keys(EMITTER_DEFAULTS);
 const SPACES = ['world', 'local'];
 const BLENDINGS = ['normal', 'additive'];
+/** Las claves que se sumaron después de 0.1.0-rc.1: en null no entran en el hash (no lo cambian). */
+const OPCIONALES_NUEVAS = ['pixel', 'form', 'formOverLife', 'align'];
 /** Las secciones que `extends` pisa por clave. */
-const SECCIONES = ['shape', 'texture', 'turbulence', 'pixel', 'form'];
+const SECCIONES = ['shape', 'texture', 'turbulence', 'pixel', 'form', 'align'];
 /** Las secciones con `type`: si cambia el tipo, no se mezclan las claves de uno con las del otro. */
-const CON_TIPO = ['shape', 'form'];
+const CON_TIPO = ['shape', 'form', 'align'];
 
 const plano = (/** @type {unknown} */ v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const finito = (/** @type {unknown} */ v) => typeof v === 'number' && Number.isFinite(v);
@@ -287,6 +293,7 @@ export function defineEmitter(def) {
     pixel: normalizePixel(de('pixel')),
     form: null,
     formOverLife: null,
+    align: normalizeAlign(de('align')),
   };
   out.form = normalizeForm(de('form'));
   out.formOverLife = formaEnLaVida(de('formOverLife'), out.form);
@@ -314,8 +321,12 @@ export function stableStringify(v) {
  */
 export function hashEmitter(def, extra = '') {
   const d = resolveEmitter(def);
+  // las claves que se sumaron después de la primera versión, si no se usan, no entran: un emisor que
+  // no las usa da el mismo hash que antes de que existieran
+  const sin = /** @type {Record<string, unknown>} */ ({ ...d });
+  for (const k of OPCIONALES_NUEVAS) if (sin[k] === null) delete sin[k];
   // la versión de la forma: si cambia su GLSL, cambia el hash
-  const s = stableStringify(d) + formSignature(d.form) + extra;
+  const s = stableStringify(sin) + formSignature(d.form) + extra;
   // FNV-1a de 53 bits, como hashMaterial
   let h1 = 0x811c9dc5, h2 = 0x01000193;
   for (let i = 0; i < s.length; i++) {

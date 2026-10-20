@@ -45,6 +45,7 @@ export const PRESETS = congelar({
     alphaOverLife: [[0, 1], [0.75, 1], [1, 0]],
     sizeOverLife: [1, 0.4],
     gravity: [0, -9.8, 0], drag: 0.5,
+    align: { type: 'velocity', stretch: 0.02 },
     blending: 'additive', softness: 0.35,
   },
   polvo: {
@@ -63,6 +64,7 @@ export const PRESETS = congelar({
     color: '#a9c3df',
     alphaOverLife: [[0, 0], [0.05, 0.7], [1, 0.7]],
     gravity: [0, -3, 0],
+    align: { type: 'velocity', stretch: 0.025 },
     blending: 'normal', softness: 0.4,
   },
   magia: {

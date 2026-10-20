@@ -4,6 +4,7 @@
 //
 //   form: 'circle'                                   // un nombre, con sus parámetros por defecto
 //   form: { type: 'star', points: 5, inner: 0.45 }   // con parámetros
+//   form: { type: 'circle', edge: 0.8 }              // edge: el borde suave (0 nítido, 1 todo degradé)
 //   formOverLife: { inner: [0.45, 0.2] }             // parámetros a lo largo de la vida (curves.js)
 //
 // `form` y no `shape`: `shape` es la forma de donde nacen las partículas (cono, esfera…).
@@ -23,7 +24,7 @@
 
 /** @typedef {{ default: number, range: [number, number], doc?: string }} FormParam */
 /** @typedef {{ name: string, version: string, params: Record<string, FormParam>, glsl: string, doc: string }} Form */
-/** @typedef {{ type: string, params: Record<string, number> }} FormDef */
+/** @typedef {{ type: string, params: Record<string, number>, edge: number }} FormDef */
 
 /** El máximo de parámetros de una forma (van en un vec4 por partícula). */
 export const MAX_FORM_PARAMS = 4;
@@ -170,14 +171,19 @@ export function normalizeForm(v, que = 'emitter.form') {
   // los parámetros pueden venir sueltos ({ type, inner }) o, ya normalizados, en params; sueltos
   // mandan (extends pisa una forma normalizada con un parámetro suelto)
   const dados = /** @type {Record<string, unknown>} */ ({ ...(o.params && typeof o.params === 'object' ? o.params : {}), ...o });
-  for (const k of Object.keys(dados)) if (k !== 'type' && k !== 'params' && !(k in forma.params)) throw new Error(`${que}.${k}: parámetro desconocido de ${forma.name} (van ${Object.keys(forma.params).join(', ') || 'ninguno'})`);
+  for (const k of Object.keys(dados)) if (!['type', 'params', 'edge'].includes(k) && !(k in forma.params)) throw new Error(`${que}.${k}: parámetro desconocido de ${forma.name} (van ${['edge', ...Object.keys(forma.params)].join(', ')})`);
+  // el borde suave, en fracción del radio (el quad va de -1 a 1): 0 es nítido. Es de la forma y no
+  // de softness (el del círculo con textura): una forma fina (un anillo, una chispa) con un borde
+  // ancho se borra entera
+  const edge = o.edge === undefined ? 0 : o.edge;
+  if (typeof edge !== 'number' || !Number.isFinite(edge) || edge < 0 || edge > 1) throw new RangeError(`${que}.edge: va de 0 (nítido) a 1 (todo degradé) (vino ${JSON.stringify(edge)})`);
   for (const [k, p] of Object.entries(forma.params)) {
     const x = dados[k] === undefined ? p.default : dados[k];
     if (typeof x !== 'number' || !Number.isFinite(x)) throw new TypeError(`${que}.${k}: va un número (vino ${JSON.stringify(x)})`);
     if (x < p.range[0] || x > p.range[1]) throw new RangeError(`${que}.${k}: va de ${p.range[0]} a ${p.range[1]} (vino ${x})`);
     params[k] = x;
   }
-  return { type: forma.name, params };
+  return { type: forma.name, params, edge };
 }
 
 /**
