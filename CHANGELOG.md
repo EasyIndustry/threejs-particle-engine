@@ -5,6 +5,29 @@ según [SemVer](https://semver.org): mientras sea `0.x`, una versión menor pued
 y si rompe queda dicho arriba de todo en esa entrada. Los pre-releases (`-rc.N`) se prueban
 en una app antes del release (ver `CONTRIBUTING.md`).
 
+## [0.1.0-rc.2] - 2026-10-20
+
+Partículas pixel art (#1). Todo suma; nada rompe.
+
+### Agregado
+
+- **`pixel`** en la definición del emisor (`null` por defecto; `true` son los valores por defecto,
+  `PIXEL_DEFAULTS`): `pixelsPerUnit` (el tamaño se redondea a píxeles enteros del arte y la textura se
+  muestrea en esa grilla), `snap` (la posición, en la grilla del plano de la vista), `fade`
+  (`'dither'` tramado de Bayer 4 × 4, `'cutout'` o `'alpha'`), `palette` (el color final al más
+  cercano de la paleta) y `rotation` (el giro de a pasos de grados; 0 sin giro, `null` libre).
+  `extends` la pisa por clave.
+- En el núcleo, `src/pixel.js`: `normalizePixel`, `pixelSize`, `stepAngle`, `createPalette`,
+  `nearestColor`, `BAYER_4` (la misma matriz que usa el shader) y `PIXEL_FADES`.
+- `simulation.data.angle`: el giro que se dibuja (con `pixel`, de a pasos). `rotation` sigue siendo
+  el simulado.
+- El ejemplo suma un fuego y chispas en pixel art.
+
+### Cambiado
+
+- El adaptador dibuja el giro de `data.angle` (sin `pixel`, es el mismo que `rotation`). Con
+  `pixel` y sin textura, el círculo suave va sin mipmaps (se muestrea en el centro de cada píxel).
+
 ## [0.1.0-rc.1] - 2026-10-20
 
 Primera versión.

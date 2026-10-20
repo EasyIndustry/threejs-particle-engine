@@ -93,13 +93,25 @@
         rate: 4, life: 4, speed: [0.3, 0.5], size: 0.5, shape: { type: 'disk', radius: 0.3 }, gravity: [0, -0.05, 0], drag: 0.2,
         alphaOverLife: [[0, 0], [0.1, 1], [0.9, 1], [1, 0]], texture: { frames: [4, 2], fps: 4, filter: 'nearest' },
       }, { texture: hoja }),
+      // pixel art: el mismo fuego y las mismas chispas, con píxeles de 1/16 de unidad, tramado,
+      // una paleta de cuatro colores y giros de a 90°
+      'fuego pixel': particulas.emitter({
+        extends: 'fuego', rate: 45, size: [0.35, 0.6], softness: 0.35,
+        pixel: { pixelsPerUnit: 16, palette: ['#fff4c2', '#ffd24a', '#ff8c1a', '#c0392b', '#5a1a10'] },
+      }),
+      'chispas pixel': particulas.emitter({
+        extends: 'chispas', rate: 10, size: [0.08, 0.14], shape: { angle: 20 },
+        pixel: { pixelsPerUnit: 16, fade: 'cutout', palette: ['#ffffff', '#ffe066', '#ff8c1a'] },
+      }),
     };
     emisores.humo.position = [0, 0.7, 0];
     emisores.chispas.position = [0, 0.15, 0];
     emisores.polvo.position = [0, 1.5, 0];
     emisores.lluvia.position = [0, 9, 0];
     emisores.flipbook.position = [-4, 0.2, 0];
-    const encendidos = { fuego: true, humo: true, chispas: true, magia: true, polvo: true, lluvia: false, flipbook: true };
+    emisores['fuego pixel'].position = [4, 0, 0];
+    emisores['chispas pixel'].position = [4, 0.15, 0];
+    const encendidos = { fuego: true, humo: true, chispas: true, magia: true, polvo: true, lluvia: false, flipbook: true, 'fuego pixel': true, 'chispas pixel': true };
     for (const [nombre, e] of Object.entries(emisores)) {
       scene.add(e.object);
       if (!encendidos[nombre]) e.stop();

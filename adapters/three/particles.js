@@ -27,19 +27,30 @@ import { resolveEmitter, defineEmitter, hashEmitter } from '../../src/emitter.js
 import { createSimulation, sortByDepth } from '../../src/simulation.js';
 import { PRESETS } from '../../src/presets.js';
 import { softCircle } from '../../src/flipbook.js';
+import { BAYER_4 } from '../../src/pixel.js';
 import { help } from '../../src/help.js';
 import { ENGINE_MEMBERS, EMITTER_MEMBERS } from '../../src/members.js';
 
 // El quad mira a la cámara: se arma en el espacio de la vista, girado por la rotación de la
 // partícula. El cuadro del flipbook va en orden de lectura desde arriba a la izquierda, con la v
-// para arriba (la misma cuenta que frameUV en src/flipbook.js).
+// para arriba (la misma cuenta que frameUV en src/flipbook.js): el vértice pasa la celda del cuadro
+// y el fragmento arma la UV, porque con pixel art primero la lleva a la grilla de la partícula.
+//
+// Pixel art (defines PIXEL, PIXEL_SNAP, FADE_DITHER, FADE_CUTOUT; ver src/pixel.js): el tamaño ya
+// viene redondeado a píxeles enteros del arte (uPPU por unidad); con snap, la esquina del quad cae
+// en la grilla de píxeles del plano de la vista (así un tamaño impar no queda a medio píxel); la
+// textura se muestrea en el centro de cada píxel del arte de la partícula, así el círculo sin
+// textura sale pixelado; y el desvanecer es un tramado de Bayer 4 × 4 en esos píxeles, o un recorte.
 const VERT = /* glsl */ `
 #include <common>
 attribute vec3 iPosition;
 attribute vec4 iColor;
-attribute vec3 iParams; // tamaño, rotación (radianes), cuadro
+attribute vec3 iParams; // tamaño, giro (radianes), cuadro
 uniform vec2 uFrames;
-varying vec2 vUv;
+uniform float uPPU;
+varying vec2 vLocal;
+varying vec2 vCelda;
+varying float vPx;
 varying vec4 vColor;
 #include <fog_pars_vertex>
 #include <logdepthbuf_pars_vertex>
@@ -49,13 +60,18 @@ void main() {
 #else
   vec4 mvPosition = modelViewMatrix * vec4(iPosition, 1.0);
 #endif
+  vPx = floor(iParams.x * uPPU + 0.5);
+#ifdef PIXEL_SNAP
+  vec2 media = vec2(vPx * 0.5);
+  mvPosition.xy = (floor(mvPosition.xy * uPPU - media + 0.5) + media) / uPPU;
+#endif
   float c = cos(iParams.y), s = sin(iParams.y);
   vec2 q = position.xy * iParams.x;
   mvPosition.xy += vec2(c * q.x - s * q.y, s * q.x + c * q.y);
   gl_Position = projectionMatrix * mvPosition;
   float cuadro = floor(iParams.z + 0.5);
-  float col = mod(cuadro, uFrames.x), fila = floor(cuadro / uFrames.x);
-  vUv = vec2((col + uv.x) / uFrames.x, 1.0 - (fila + 1.0 - uv.y) / uFrames.y);
+  vCelda = vec2(mod(cuadro, uFrames.x), floor(cuadro / uFrames.x));
+  vLocal = uv;
   vColor = iColor;
 #include <logdepthbuf_vertex>
 #include <fog_vertex>
@@ -66,14 +82,36 @@ void main() {
 const FRAG = /* glsl */ `
 #include <common>
 uniform sampler2D uMap;
-varying vec2 vUv;
+uniform vec2 uFrames;
+varying vec2 vLocal;
+varying vec2 vCelda;
+varying float vPx;
 varying vec4 vColor;
+#ifdef FADE_DITHER
+const float BAYER[16] = float[16](${BAYER_4.map((x) => x.toFixed(5)).join(', ')});
+#endif
 #include <fog_pars_fragment>
 #include <logdepthbuf_pars_fragment>
 void main() {
 #include <logdepthbuf_fragment>
-  vec4 color = vColor * texture2D(uMap, vUv);
+#ifdef PIXEL
+  vec2 pixel = floor(vLocal * max(vPx, 1.0));
+  vec2 local = (pixel + 0.5) / max(vPx, 1.0);
+#else
+  vec2 local = vLocal;
+#endif
+  vec2 uv = vec2((vCelda.x + local.x) / uFrames.x, 1.0 - (vCelda.y + 1.0 - local.y) / uFrames.y);
+  vec4 color = vColor * texture2D(uMap, uv);
+#if defined(FADE_DITHER)
+  int k = int(mod(pixel.y, 4.0)) * 4 + int(mod(pixel.x, 4.0));
+  if (color.a < BAYER[k]) discard;
+  color.a = 1.0;
+#elif defined(FADE_CUTOUT)
+  if (color.a < 0.5) discard;
+  color.a = 1.0;
+#else
   if (color.a < 0.002) discard;
+#endif
   gl_FragColor = color;
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
@@ -112,15 +150,19 @@ export function createParticleEngine({ sort = true } = {}) {
   /** @type {[number, number, number, number]} */ const rotacion = [0, 0, 0, 1];
   /** @type {[number, number, number]} */ const vista = [0, 0, 0];
 
-  /** El círculo suave de una softness. @param {number} softness */
-  function circulo(softness) {
-    const k = softness.toFixed(3);
+  /**
+   * El círculo suave de una softness. Con pixel art, sin mipmaps: se muestrea en el centro de cada
+   * píxel del arte y la UV salta de uno a otro (un mipmap elegiría mal el nivel en esos saltos).
+   * @param {number} softness @param {boolean} pixel
+   */
+  function circulo(softness, pixel) {
+    const k = `${softness.toFixed(3)}${pixel ? ' pixel' : ''}`;
     let t = circulos.get(k);
     if (!t) {
       t = new THREE.DataTexture(softCircle(LADO_CIRCULO, softness), LADO_CIRCULO, LADO_CIRCULO, THREE.RGBAFormat, THREE.UnsignedByteType);
-      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.minFilter = pixel ? THREE.LinearFilter : THREE.LinearMipmapLinearFilter;
       t.magFilter = THREE.LinearFilter;
-      t.generateMipmaps = true;
+      t.generateMipmaps = !pixel;
       t.needsUpdate = true;
       t.name = `círculo suave ${k}`;
       circulos.set(k, t);
@@ -154,12 +196,12 @@ export function createParticleEngine({ sort = true } = {}) {
     geo.setAttribute('iParams', aParams);
     geo.instanceCount = 0;
 
-    // pixel art: con filter 'nearest' se usa una copia de la textura de la app con NearestFilter
-    // (comparte la imagen; la de la app queda como estaba)
+    // pixel art: con filter 'nearest' (o con pixel) se usa una copia de la textura de la app con
+    // NearestFilter y sin mipmaps (comparte la imagen; la de la app queda como estaba)
     /** @type {THREE.Texture | null} */
     let copia = null;
     let versionFuente = -1;
-    if (texture && d.texture.filter === 'nearest') {
+    if (texture && (d.texture.filter === 'nearest' || d.pixel)) {
       copia = texture.clone();
       copia.magFilter = THREE.NearestFilter;
       copia.minFilter = THREE.NearestFilter;
@@ -173,13 +215,22 @@ export function createParticleEngine({ sort = true } = {}) {
     };
     alDia();
 
-    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uFrames: { value: new THREE.Vector2(d.texture.frames[0], d.texture.frames[1]) } }]);
+    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      uFrames: { value: new THREE.Vector2(d.texture.frames[0], d.texture.frames[1]) },
+      uPPU: { value: d.pixel ? d.pixel.pixelsPerUnit : 1 },
+    }]);
     // la textura va aparte: merge clona las texturas
-    uniforms.uMap = { value: copia ?? texture ?? circulo(d.softness) };
+    uniforms.uMap = { value: copia ?? texture ?? circulo(d.softness, !!d.pixel) };
     /** @type {Record<string, string>} */
     const defines = {};
     if (d.space === 'world') defines.ESPACIO_MUNDO = '';
     if (d.blending === 'additive') defines.ADITIVO = '';
+    if (d.pixel) {
+      defines.PIXEL = '';
+      if (d.pixel.snap) defines.PIXEL_SNAP = '';
+      if (d.pixel.fade === 'dither') defines.FADE_DITHER = '';
+      if (d.pixel.fade === 'cutout') defines.FADE_CUTOUT = '';
+    }
     const mat = new THREE.ShaderMaterial({
       name: `partículas ${d.name}`.trim(), vertexShader: VERT, fragmentShader: FRAG, uniforms, defines,
       transparent: true, depthWrite: false, fog: true,
@@ -210,7 +261,7 @@ export function createParticleEngine({ sort = true } = {}) {
     /** Copia las vivas a los atributos (en orden de atrás para adelante si hace falta) y las sube. @param {THREE.Camera | undefined} camara */
     function subir(camara) {
       const n = sim.alive;
-      const { position: P, color: C, size, rotation, frame } = sim.data;
+      const { position: P, color: C, size, angle, frame } = sim.data;
       /** @type {Uint32Array | null} */
       let o = null;
       if (ordenar && camara && d.blending === 'normal' && n > 1) {
@@ -226,12 +277,12 @@ export function createParticleEngine({ sort = true } = {}) {
           const i = o[k];
           ap[k * 3] = P[i * 3]; ap[k * 3 + 1] = P[i * 3 + 1]; ap[k * 3 + 2] = P[i * 3 + 2];
           ac[k * 4] = C[i * 4]; ac[k * 4 + 1] = C[i * 4 + 1]; ac[k * 4 + 2] = C[i * 4 + 2]; ac[k * 4 + 3] = C[i * 4 + 3];
-          ar[k * 3] = size[i]; ar[k * 3 + 1] = rotation[i]; ar[k * 3 + 2] = frame[i];
+          ar[k * 3] = size[i]; ar[k * 3 + 1] = angle[i]; ar[k * 3 + 2] = frame[i];
         }
       } else {
         ap.set(P.subarray(0, n * 3));
         ac.set(C.subarray(0, n * 4));
-        for (let i = 0; i < n; i++) { ar[i * 3] = size[i]; ar[i * 3 + 1] = rotation[i]; ar[i * 3 + 2] = frame[i]; }
+        for (let i = 0; i < n; i++) { ar[i * 3] = size[i]; ar[i * 3 + 1] = angle[i]; ar[i * 3 + 2] = frame[i]; }
       }
       if (n > 0) {
         for (const [a, ancho] of /** @type {const} */ ([[aPos, 3], [aColor, 4], [aParams, 3]])) {

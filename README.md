@@ -54,9 +54,24 @@ particulas.help();                                                          // t
 - **Sin textura, un círculo suave** generado (`softness`: de borde duro a todo degradé). **Con
   `texture`**, cualquier `THREE.Texture`: una hoja de flipbook, o una que hornea
   threejs-material-engine (su generador `dots`, por ejemplo).
-- **Pixel art**: `texture: { filter: 'nearest' }` dibuja el flipbook con `NearestFilter` (una copia
-  de la textura de la app, que queda como estaba). La grilla es la misma de threejs-sprite-engine:
+- **Pixel art**: `pixel: { pixelsPerUnit, snap, fade, palette, rotation }` (o `pixel: true`) hace que
+  las partículas sean del mismo mundo que los sprites de threejs-sprite-engine:
+  - el tamaño se redondea a **píxeles enteros** del arte (`pixelsPerUnit`, como en los sprites), y la
+    textura se muestrea en esa grilla: sin textura, el círculo sale como un disco de píxeles;
+  - `snap` pega la posición a la grilla de píxeles en el plano de la vista;
+  - `fade`: `'dither'` desvanece con un **tramado** de Bayer 4 × 4 en píxeles del arte, `'cutout'`
+    recorta duro, `'alpha'` es la transparencia de siempre;
+  - `palette` lleva el color final (nacimiento × `colorOverLife`) al **más cercano de la paleta**:
+    salta por escalones en vez de pasar por los tonos intermedios;
+  - `rotation` gira de a pasos (90: cuartos de vuelta; 0: sin giro; `null`: libre).
+
+  El tamaño, el color y el giro se redondean en la simulación (lo prueba Node); lo simulado no
+  cambia. Con una textura de la app, se usa una copia con `NearestFilter` (también con `texture: {
+  filter: 'nearest' }` sin `pixel`). La grilla del flipbook es la misma de threejs-sprite-engine:
   cuadros en orden de lectura, de arriba a la izquierda, con `count` si la última fila no está llena.
+  Con cámara en perspectiva, cada partícula queda en la grilla de su profundidad; la grilla exacta de
+  toda la pantalla es el look pixelado de render
+  ([threejs-render-engine#13](https://github.com/EasyIndustry/threejs-render-engine/issues/13)).
 - **Sin build**, módulos ES. **Núcleo puro**: `src/` no importa three ni el DOM. three está en
   `adapters/three/`, como *peer* opcional.
 
@@ -118,7 +133,7 @@ motor.onFrame((dt) => particulas.update(dt, motor.camera));
   niebla en vez de aclararse).
 - **threejs-material-engine**: una textura horneada (un mapa de `bake()`) va como `texture`.
 - **threejs-sprite-engine**: la grilla del flipbook es el mismo formato que la de una hoja de sprites;
-  para pixel art, `filter: 'nearest'`. El look pixelado de la pantalla entera es de render (pedido en
+  para pixel art, `pixel` con el mismo `pixelsPerUnit` que los sprites. El look pixelado de la pantalla entera es de render (pedido en
   [threejs-render-engine#13](https://github.com/EasyIndustry/threejs-render-engine/issues/13)), y el
   filtro nearest en materiales, de material-engine
   ([threejs-material-engine#1](https://github.com/EasyIndustry/threejs-material-engine/issues/1)).

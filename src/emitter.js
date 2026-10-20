@@ -15,6 +15,7 @@
 //     space: 'world',                                   // 'world': quedan en el mundo; 'local': siguen al emisor
 //     texture: { frames: [4, 4], fps: 12, random: false, filter: 'linear' },   // flipbook (flipbook.js)
 //     blending: 'normal', softness: 0.5, seed: 1,
+//     pixel: { pixelsPerUnit: 16, snap: true, fade: 'dither', palette: null, rotation: 90 },   // pixel art (pixel.js)
 //   }
 //
 // Qué hace cada cosa a lo largo de la vida:
@@ -27,15 +28,19 @@
 //   - turbulence empuja con un ruido (noise.js): strength es la aceleración, scale el tamaño de los
 //     remolinos (en unidades del mundo) y speed cuán rápido cambian.
 //   - softness es el borde del círculo suave que se usa sin textura (0 duro, 1 todo degradé).
+//   - pixel (null: sin pixel art) redondea el tamaño a píxeles enteros, lleva el color a la paleta y
+//     el giro a pasos; el adaptador pega la posición a la grilla, muestrea la textura en ella y
+//     trama el desvanecer. Ver pixel.js.
 //
 // `extends` parte de un preset (por nombre) o de otra definición, y pisa lo que se pasa: `shape`,
-// `texture` y `turbulence` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
+// `texture`, `turbulence` y `pixel` se pisan por clave (salvo que cambie el tipo de forma), el resto entero.
 //
 // Puro: no importa three ni DOM.
 import { isHexColor, normalizeHex } from './color.js';
 import { normalizeCurve } from './curves.js';
 import { normalizeShape } from './shapes.js';
 import { normalizeFlipbook } from './flipbook.js';
+import { normalizePixel } from './pixel.js';
 import { PRESETS } from './presets.js';
 
 /** @typedef {[number, number]} Range */
@@ -50,7 +55,7 @@ import { PRESETS } from './presets.js';
  *   alphaOverLife: import('./curves.js').NumberCurve | null, speedOverLife: import('./curves.js').NumberCurve | null,
  *   gravity: Vec3, drag: number, wind: Vec3, turbulence: { strength: number, scale: number, speed: number } | null,
  *   space: 'world' | 'local', texture: import('./flipbook.js').Flipbook, blending: 'normal' | 'additive',
- *   softness: number, seed: number,
+ *   softness: number, seed: number, pixel: import('./pixel.js').PixelDef | null,
  * }} EmitterDef
  */
 
@@ -60,13 +65,13 @@ export const EMITTER_DEFAULTS = Object.freeze({
   shape: 'point', life: 1, speed: 1, size: 0.1, rotation: 0, angularVelocity: 0, color: '#ffffff',
   sizeOverLife: null, colorOverLife: null, alphaOverLife: null, speedOverLife: null,
   gravity: Object.freeze([0, 0, 0]), drag: 0, wind: Object.freeze([0, 0, 0]), turbulence: null,
-  space: 'world', texture: null, blending: 'normal', softness: 0.5, seed: 1,
+  space: 'world', texture: null, blending: 'normal', softness: 0.5, seed: 1, pixel: null,
 });
 const CLAVES = Object.keys(EMITTER_DEFAULTS);
 const SPACES = ['world', 'local'];
 const BLENDINGS = ['normal', 'additive'];
 /** Las secciones que `extends` pisa por clave. */
-const SECCIONES = ['shape', 'texture', 'turbulence'];
+const SECCIONES = ['shape', 'texture', 'turbulence', 'pixel'];
 
 const plano = (/** @type {unknown} */ v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const finito = (/** @type {unknown} */ v) => typeof v === 'number' && Number.isFinite(v);
@@ -249,6 +254,7 @@ export function defineEmitter(def) {
     blending: /** @type {EmitterDef['blending']} */ (blending),
     softness: num(de('softness'), 'emitter.softness', 0, 1),
     seed,
+    pixel: normalizePixel(de('pixel')),
   };
   normalizados.add(out);
   return out;
