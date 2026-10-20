@@ -1,0 +1,22 @@
+{
+  "name": "threejs-particle-engine",
+  "version": "0.1.0-rc.1",
+  "description": "Partículas para three.js: humo, chispas, polvo, magia, lluvia, explosiones. El emisor es datos (se valida, se hashea, se guarda en JSON), la simulación es pura y determinista, y se dibuja con una sola llamada por emisor.",
+  "type": "module",
+  "license": "MIT",
+  "author": "EasyIndustry",
+  "repository": { "type": "git", "url": "git+https://github.com/EasyIndustry/threejs-particle-engine.git" },
+  "exports": {
+    ".": "./src/index.js",
+    "./three": "./adapters/three/particles.js"
+  },
+  "files": ["src", "adapters", "examples", "LICENSE", "README.md"],
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc -p ."
+  },
+  "peerDependencies": { "three": ">=0.160.0" },
+  "peerDependenciesMeta": { "three": { "optional": true } },
+  "devDependencies": { "typescript": "^6.0.0" },
+  "engines": { "node": ">=20" }
+}

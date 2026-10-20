@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Particle engine</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #15161a; font: 12px system-ui, sans-serif; color: #ddd; }
+    #panel { position: absolute; left: 12px; top: 10px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 24px); }
+    #panel button { font: inherit; color: #ddd; background: #2a2c33; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+    #panel button[aria-pressed="true"] { background: #4a3a1c; border-color: #b8862f; }
+    #estado { position: absolute; left: 12px; bottom: 10px; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div id="panel"></div>
+  <div id="estado"></div>
+  <script type="module">
+    // Una escena con three directo y OrbitControls (sin threejs-render-engine). Con render sería:
+    //
+    //   const motor = createEngine(document.body, { preset: 'dark' });
+    //   const particulas = createParticleEngine();
+    //   motor.content.add(particulas.emitter({ extends: 'fuego' }).object);
+    //   motor.onFrame((dt) => particulas.update(dt, motor.camera));
+    //
+    // y las partículas quedan solas fuera de las aristas y de la AO (userData.noEdge / noAO), y
+    // fuera del render final (son material de shader propio).
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { createParticleEngine } from '../adapters/three/particles.js';
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#15161a');
+    scene.fog = new THREE.Fog('#15161a', 18, 40);
+    scene.add(new THREE.HemisphereLight('#9fb2c8', '#2a2018', 1.2));
+    const sol = new THREE.DirectionalLight('#ffffff', 1.5);
+    sol.position.set(4, 8, 5);
+    scene.add(sol);
+    const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.05, 200);
+    camera.position.set(0, 3.5, 11);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1, 0);
+    addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+
+    // el piso y unos troncos para el fuego
+    const piso = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: '#3a3833', roughness: 0.95 }));
+    piso.rotation.x = -Math.PI / 2;
+    scene.add(piso);
+    for (const a of [0, 1, 2]) {
+      const tronco = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.8, 8), new THREE.MeshStandardMaterial({ color: '#4a2f1d' }));
+      tronco.rotation.set(Math.PI / 2, 0, (a * Math.PI * 2) / 3);
+      tronco.position.y = 0.07;
+      scene.add(tronco);
+    }
+
+    // una hoja de flipbook hecha acá mismo: 4 × 2 cuadros con su número, en pixel art (nearest)
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 32;
+    const g = c.getContext('2d');
+    for (let i = 0; i < 8; i++) {
+      const x = (i % 4) * 16, y = Math.floor(i / 4) * 16;
+      g.fillStyle = `hsl(${i * 45}, 80%, 55%)`;
+      g.fillRect(x + 1, y + 1, 14, 14);
+      g.fillStyle = '#000';
+      g.font = 'bold 11px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(String(i), x + 8, y + 8.5);
+    }
+    const hoja = new THREE.CanvasTexture(c);
+    hoja.colorSpace = THREE.SRGBColorSpace;
+
+    const particulas = createParticleEngine();
+    const emisores = {
+      fuego: particulas.emitter({ extends: 'fuego' }),
+      humo: particulas.emitter({ extends: 'humo', rate: 8 }),
+      chispas: particulas.emitter({ extends: 'chispas', rate: 12, shape: { angle: 20 } }),
+      magia: particulas.emitter({ extends: 'magia', shape: { radius: 0.15 }, rate: 120 }), // gira alrededor: deja la estela en el mundo
+      polvo: particulas.emitter({ extends: 'polvo', shape: { size: [10, 3, 10] }, rate: 30, max: 400 }),
+      lluvia: particulas.emitter({ extends: 'lluvia' }),
+      flipbook: particulas.emitter({
+        rate: 4, life: 4, speed: [0.3, 0.5], size: 0.5, shape: { type: 'disk', radius: 0.3 }, gravity: [0, -0.05, 0], drag: 0.2,
+        alphaOverLife: [[0, 0], [0.1, 1], [0.9, 1], [1, 0]], texture: { frames: [4, 2], fps: 4, filter: 'nearest' },
+      }, { texture: hoja }),
+    };
+    emisores.humo.position = [0, 0.7, 0];
+    emisores.chispas.position = [0, 0.15, 0];
+    emisores.polvo.position = [0, 1.5, 0];
+    emisores.lluvia.position = [0, 9, 0];
+    emisores.flipbook.position = [-4, 0.2, 0];
+    const encendidos = { fuego: true, humo: true, chispas: true, magia: true, polvo: true, lluvia: false, flipbook: true };
+    for (const [nombre, e] of Object.entries(emisores)) {
+      scene.add(e.object);
+      if (!encendidos[nombre]) e.stop();
+    }
+
+    // botones: prender y apagar cada emisor, y una explosión que se suelta sola al terminar
+    const panel = document.getElementById('panel');
+    for (const nombre of Object.keys(emisores)) {
+      const b = document.createElement('button');
+      b.textContent = nombre;
+      b.setAttribute('aria-pressed', String(encendidos[nombre]));
+      b.onclick = () => {
+        encendidos[nombre] = !encendidos[nombre];
+        b.setAttribute('aria-pressed', String(encendidos[nombre]));
+        encendidos[nombre] ? emisores[nombre].play() : emisores[nombre].stop();
+      };
+      panel.appendChild(b);
+    }
+    function explotar(x = (Math.random() - 0.5) * 6, z = (Math.random() - 0.5) * 4 + 2) {
+      const e = particulas.emitter({
+        extends: 'chispas', loop: false, rate: 0, max: 400, duration: 0.5,
+        bursts: [{ time: 0, count: [220, 280] }], shape: { type: 'sphere', radius: 0.1 }, speed: [2, 7], life: [0.6, 1.4],
+      }, { autoDispose: true });
+      const humo = particulas.emitter({ extends: 'humo', loop: false, prewarm: false, rate: 0, duration: 0.5, bursts: [{ time: 0, count: 30 }], shape: { type: 'sphere', radius: 0.4 }, speed: [0.2, 0.8], wind: [0, 0, 0] }, { autoDispose: true });
+      e.position = [x, 0.6, z];
+      humo.position = [x, 0.6, z];
+      scene.add(e.object, humo.object);
+    }
+    const boom = document.createElement('button');
+    boom.textContent = 'explosión';
+    boom.onclick = () => explotar();
+    panel.appendChild(boom);
+    const ayuda = document.createElement('button');
+    ayuda.textContent = 'help() en la consola';
+    ayuda.onclick = () => { particulas.help(); emisores.fuego.help(); };
+    panel.appendChild(ayuda);
+
+    const estado = document.getElementById('estado');
+    const reloj = new THREE.Clock();
+    let t = 0, cuadros = 0, acumulado = 0;
+    renderer.setAnimationLoop(() => {
+      const dt = reloj.getDelta();
+      t += dt;
+      emisores.magia.object.position.set(Math.cos(t * 1.3) * 2.5, 1.4 + Math.sin(t * 2.6) * 0.4, Math.sin(t * 1.3) * 2.5);
+      particulas.update(dt, camera);
+      controls.update();
+      renderer.render(scene, camera);
+      cuadros++; acumulado += dt;
+      if (acumulado > 0.5) {
+        const s = particulas.stats();
+        estado.textContent = `${Math.round(cuadros / acumulado)} fps — ${s.emitters} emisores, ${s.alive} partículas, ${s.drawCalls} llamadas de dibujo`;
+        cuadros = 0; acumulado = 0;
+      }
+    });
+    Object.assign(window, { THREE, scene, camera, controls, renderer, particulas, emisores, explotar, listo: true });
+  </script>
+</body>
+</html>
